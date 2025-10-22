@@ -5,6 +5,8 @@ from selenium.webdriver.edge.service import Service as EdgeService
 from selenium.webdriver.chrome.options import Options as ChromeOptions
 from selenium.webdriver.firefox.options import Options as FirefoxOptions
 from selenium.webdriver.edge.options import Options as EdgeOptions
+from webdriver_manager.chrome import ChromeDriverManager
+from webdriver_manager.firefox import GeckoDriverManager
 from config.config import Config
 import os
 import platform
@@ -34,6 +36,11 @@ class WebDriverManager:
             options.add_argument('--disable-web-security')
             options.add_argument('--allow-running-insecure-content')
             options.add_argument('--disable-blink-features=AutomationControlled')
+            options.add_argument('--disable-background-timer-throttling')
+            options.add_argument('--disable-backgrounding-occluded-windows')
+            options.add_argument('--disable-renderer-backgrounding')
+            options.add_argument('--disable-features=TranslateUI')
+            options.add_argument('--disable-ipc-flooding-protection')
             options.add_experimental_option("excludeSwitches", ["enable-automation"])
             options.add_experimental_option('useAutomationExtension', False)
             
@@ -42,16 +49,26 @@ class WebDriverManager:
             if driver_path:
                 service = ChromeService(driver_path)
             else:
-                # Try to create without service (use system chromedriver)
-                service = None
+                # Use webdriver-manager as fallback
+                try:
+                    # Try to get compatible ChromeDriver version
+                    driver_path = ChromeDriverManager().install()
+                    service = ChromeService(driver_path)
+                    print(f"Using ChromeDriver from webdriver-manager: {driver_path}")
+                except Exception as e:
+                    print(f"WebDriver Manager failed: {e}")
+                    # Try without service as last resort
+                    service = None
             
             try:
                 if service:
                     driver = webdriver.Chrome(service=service, options=options)
                 else:
                     driver = webdriver.Chrome(options=options)
+                print("Chrome driver created successfully")
             except Exception as e:
                 print(f"Chrome failed: {e}")
+                print("Attempting fallback to Firefox...")
                 # Fallback to Firefox
                 return WebDriverManager._create_firefox_driver()
             
@@ -97,12 +114,28 @@ class WebDriverManager:
         if Config.HEADLESS:
             options.add_argument('--headless')
         
+        # Add CI/CD specific options
+        options.add_argument('--no-sandbox')
+        options.add_argument('--disable-dev-shm-usage')
+        options.add_argument('--disable-gpu')
+        options.add_argument('--disable-extensions')
+        options.add_argument('--disable-web-security')
+        options.add_argument('--allow-running-insecure-content')
+        
         # Set window size
         options.add_argument(f'--width={Config.get_window_size()[0]}')
         options.add_argument(f'--height={Config.get_window_size()[1]}')
         
         # Try to find geckodriver in PATH first
         driver_path = WebDriverManager.find_driver_in_path('geckodriver')
+        
+        if not driver_path:
+            # Use webdriver-manager as fallback
+            try:
+                driver_path = GeckoDriverManager().install()
+            except Exception as e:
+                print(f"WebDriver Manager failed: {e}")
+                driver_path = None
         
         try:
             if driver_path:

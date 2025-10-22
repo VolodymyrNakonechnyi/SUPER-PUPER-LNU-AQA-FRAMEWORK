@@ -1,0 +1,143 @@
+name: BDD Framework Tests CI/CD
+
+on:
+  push:
+    branches: [ main, develop ]
+  pull_request:
+    branches: [ main, develop ]
+  schedule:
+    # Run tests daily at 2 AM UTC
+    - cron: '0 2 * * *'
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        python-version: ['3.9', '3.10', '3.11']
+
+    steps:
+    - uses: actions/checkout@v3
+    
+    - name: Set up Python ${{ matrix.python-version }}
+      uses: actions/setup-python@v4
+      with:
+        python-version: ${{ matrix.python-version }}
+    
+    - name: Install dependencies
+      run: |
+        python -m pip install --upgrade pip
+        pip install -r requirements.txt
+    
+    - name: Install system dependencies for browsers
+      run: |
+        sudo apt-get update
+        sudo apt-get install -y wget gnupg xvfb unzip
+        # Install Chrome
+        wget -q -O - https://dl.google.com/linux/linux_signing_key.pub | sudo apt-key add -
+        echo "deb [arch=amd64] http://dl.google.com/linux/chrome/deb/ stable main" | sudo tee /etc/apt/sources.list.d/google-chrome.list
+        sudo apt-get update
+        sudo apt-get install -y google-chrome-stable
+        # Install Firefox
+        sudo apt-get install -y firefox
+        # Install geckodriver
+        wget https://github.com/mozilla/geckodriver/releases/download/v0.33.0/geckodriver-v0.33.0-linux64.tar.gz
+        tar -xzf geckodriver-v0.33.0-linux64.tar.gz
+        sudo mv geckodriver /usr/local/bin/
+        sudo chmod +x /usr/local/bin/geckodriver
+        # Install ChromeDriver using webdriver-manager approach
+        echo "Chrome version: $(google-chrome --version)"
+        # Install latest ChromeDriver that's compatible
+        pip install webdriver-manager
+        # Let webdriver-manager handle the version compatibility
+    
+    - name: Run CI-ready tests (no browser required)
+      env:
+        CI: true
+        GITHUB_ACTIONS: true
+        BROWSER: chrome
+        HEADLESS: true
+      run: |
+        pytest tests/test_ci_ready.py -v --tb=short --html=reports/ci_ready_tests.html --self-contained-html
+    
+    - name: Run framework unit tests
+      env:
+        CI: true
+        GITHUB_ACTIONS: true
+      run: |
+        pytest tests/test_framework_components.py -v --tb=short --html=reports/framework_tests.html --self-contained-html
+    
+    - name: Run BDD tests
+      env:
+        BROWSER: chrome
+        HEADLESS: true
+        WINDOW_SIZE: 1920,1080
+        DISPLAY: ":99"
+        PYTHONPATH: ${{ github.workspace }}
+      run: |
+        # Start virtual display for headless browsers
+        export DISPLAY=:99
+        Xvfb :99 -screen 0 1920x1080x24 > /dev/null 2>&1 &
+        sleep 3
+        pytest tests/test_bdd_scenarios.py -v --tb=short --html=reports/bdd_tests.html --self-contained-html
+    
+    - name: Generate coverage report
+      run: |
+        pytest tests/ --cov=framework --cov=pages --cov=config --cov-report=html --cov-report=term
+    
+    - name: Upload test reports
+      if: always()
+      uses: actions/upload-artifact@v4
+      with:
+        name: test-reports-py${{ matrix.python-version }}
+        path: reports/
+
+    - name: Upload coverage reports
+      if: always()
+      uses: actions/upload-artifact@v4
+      with:
+        name: coverage-report-py${{ matrix.python-version }}
+        path: htmlcov/
+
+  security-scan:
+    runs-on: ubuntu-latest
+    steps:
+    - uses: actions/checkout@v3
+    
+    - name: Set up Python
+      uses: actions/setup-python@v4
+      with:
+        python-version: '3.11'
+    
+    - name: Install dependencies
+      run: |
+        python -m pip install --upgrade pip
+        pip install bandit safety
+    
+    - name: Run security scan
+      run: |
+        bandit -r framework pages config tests -f json -o bandit-report.json || true
+        safety check --json || true
+
+  lint:
+    runs-on: ubuntu-latest
+    steps:
+    - uses: actions/checkout@v3
+    
+    - name: Set up Python
+      uses: actions/setup-python@v4
+      with:
+        python-version: '3.11'
+    
+    - name: Install linting tools
+      run: |
+        python -m pip install --upgrade pip
+        pip install flake8 pylint
+    
+    - name: Lint with flake8
+      run: |
+        flake8 framework pages config tests --count --select=E9,F63,F7,F82 --show-source --statistics || true
+    
+    - name: Lint with pylint
+      run: |
+        pylint framework pages config tests --disable=all --enable=E,F || true
