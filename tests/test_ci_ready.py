@@ -98,7 +98,7 @@ class TestCIReady:
             return "then executed"
         
         # Build scenario
-        builder = BDDScenarioBuilder("Test", registry")
+        builder = BDDScenarioBuilder("Test", registry)
         scenario = (builder
                     .given("test precondition")
                     .when("test action")
