@@ -29,12 +29,50 @@ jobs:
         python -m pip install --upgrade pip
         pip install -r requirements.txt
     
+    - name: Install system dependencies for browsers
+      run: |
+        sudo apt-get update
+        sudo apt-get install -y wget gnupg xvfb unzip
+        # Install Chrome
+        wget -q -O - https://dl.google.com/linux/linux_signing_key.pub | sudo apt-key add -
+        echo "deb [arch=amd64] http://dl.google.com/linux/chrome/deb/ stable main" | sudo tee /etc/apt/sources.list.d/google-chrome.list
+        sudo apt-get update
+        sudo apt-get install -y google-chrome-stable
+        # Install Firefox
+        sudo apt-get install -y firefox
+        # Install geckodriver
+        wget https://github.com/mozilla/geckodriver/releases/download/v0.33.0/geckodriver-v0.33.0-linux64.tar.gz
+        tar -xzf geckodriver-v0.33.0-linux64.tar.gz
+        sudo mv geckodriver /usr/local/bin/
+        sudo chmod +x /usr/local/bin/geckodriver
+        # Install ChromeDriver
+        wget https://chromedriver.storage.googleapis.com/LATEST_RELEASE
+        CHROME_VERSION=$(cat LATEST_RELEASE)
+        wget https://chromedriver.storage.googleapis.com/${CHROME_VERSION}/chromedriver_linux64.zip
+        unzip chromedriver_linux64.zip
+        sudo mv chromedriver /usr/local/bin/
+        sudo chmod +x /usr/local/bin/chromedriver
+    
+    - name: Run CI-ready tests (no browser required)
+      run: |
+        pytest tests/test_ci_ready.py -v --tb=short --html=reports/ci_ready_tests.html --self-contained-html
+    
     - name: Run framework unit tests
       run: |
         pytest tests/test_framework_components.py -v --tb=short --html=reports/framework_tests.html --self-contained-html
     
     - name: Run BDD tests
+      env:
+        BROWSER: chrome
+        HEADLESS: true
+        WINDOW_SIZE: 1920,1080
+        DISPLAY: ":99"
+        PYTHONPATH: ${{ github.workspace }}
       run: |
+        # Start virtual display for headless browsers
+        export DISPLAY=:99
+        Xvfb :99 -screen 0 1920x1080x24 > /dev/null 2>&1 &
+        sleep 3
         pytest tests/test_bdd_scenarios.py -v --tb=short --html=reports/bdd_tests.html --self-contained-html
     
     - name: Generate coverage report
