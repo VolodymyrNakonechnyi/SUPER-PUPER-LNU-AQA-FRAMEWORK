@@ -45,13 +45,11 @@ jobs:
         tar -xzf geckodriver-v0.33.0-linux64.tar.gz
         sudo mv geckodriver /usr/local/bin/
         sudo chmod +x /usr/local/bin/geckodriver
-        # Install ChromeDriver
-        wget https://chromedriver.storage.googleapis.com/LATEST_RELEASE
-        CHROME_VERSION=$(cat LATEST_RELEASE)
-        wget https://chromedriver.storage.googleapis.com/${CHROME_VERSION}/chromedriver_linux64.zip
-        unzip chromedriver_linux64.zip
-        sudo mv chromedriver /usr/local/bin/
-        sudo chmod +x /usr/local/bin/chromedriver
+        # Install ChromeDriver using webdriver-manager approach
+        echo "Chrome version: $(google-chrome --version)"
+        # Install latest ChromeDriver that's compatible
+        pip install webdriver-manager
+        # Let webdriver-manager handle the version compatibility
     
     - name: Run CI-ready tests (no browser required)
       env:

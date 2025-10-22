@@ -51,10 +51,13 @@ class WebDriverManager:
             else:
                 # Use webdriver-manager as fallback
                 try:
+                    # Try to get compatible ChromeDriver version
                     driver_path = ChromeDriverManager().install()
                     service = ChromeService(driver_path)
+                    print(f"Using ChromeDriver from webdriver-manager: {driver_path}")
                 except Exception as e:
                     print(f"WebDriver Manager failed: {e}")
+                    # Try without service as last resort
                     service = None
             
             try:
@@ -62,8 +65,10 @@ class WebDriverManager:
                     driver = webdriver.Chrome(service=service, options=options)
                 else:
                     driver = webdriver.Chrome(options=options)
+                print("Chrome driver created successfully")
             except Exception as e:
                 print(f"Chrome failed: {e}")
+                print("Attempting fallback to Firefox...")
                 # Fallback to Firefox
                 return WebDriverManager._create_firefox_driver()
             
