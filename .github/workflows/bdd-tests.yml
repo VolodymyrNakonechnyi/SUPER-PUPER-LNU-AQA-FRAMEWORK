@@ -54,10 +54,18 @@ jobs:
         sudo chmod +x /usr/local/bin/chromedriver
     
     - name: Run CI-ready tests (no browser required)
+      env:
+        CI: true
+        GITHUB_ACTIONS: true
+        BROWSER: chrome
+        HEADLESS: true
       run: |
         pytest tests/test_ci_ready.py -v --tb=short --html=reports/ci_ready_tests.html --self-contained-html
     
     - name: Run framework unit tests
+      env:
+        CI: true
+        GITHUB_ACTIONS: true
       run: |
         pytest tests/test_framework_components.py -v --tb=short --html=reports/framework_tests.html --self-contained-html
     
