@@ -1,0 +1,134 @@
+from selenium import webdriver
+from selenium.webdriver.chrome.service import Service as ChromeService
+from selenium.webdriver.firefox.service import Service as FirefoxService
+from selenium.webdriver.edge.service import Service as EdgeService
+from selenium.webdriver.chrome.options import Options as ChromeOptions
+from selenium.webdriver.firefox.options import Options as FirefoxOptions
+from selenium.webdriver.edge.options import Options as EdgeOptions
+from config.config import Config
+import os
+import platform
+import shutil
+
+
+class WebDriverManager:
+    @staticmethod
+    def find_driver_in_path(driver_name):
+        """Find driver in system PATH"""
+        return shutil.which(driver_name)
+    
+    @staticmethod
+    def create_driver():
+        """Create and configure WebDriver instance"""
+        browser = Config.BROWSER.lower()
+        
+        if browser == 'chrome':
+            options = ChromeOptions()
+            if Config.HEADLESS:
+                options.add_argument('--headless')
+            options.add_argument(f'--window-size={Config.WINDOW_SIZE}')
+            options.add_argument('--no-sandbox')
+            options.add_argument('--disable-dev-shm-usage')
+            options.add_argument('--disable-gpu')
+            options.add_argument('--disable-extensions')
+            options.add_argument('--disable-web-security')
+            options.add_argument('--allow-running-insecure-content')
+            options.add_argument('--disable-blink-features=AutomationControlled')
+            options.add_experimental_option("excludeSwitches", ["enable-automation"])
+            options.add_experimental_option('useAutomationExtension', False)
+            
+            # Try to find chromedriver in PATH first
+            driver_path = WebDriverManager.find_driver_in_path('chromedriver')
+            if driver_path:
+                service = ChromeService(driver_path)
+            else:
+                # Try to create without service (use system chromedriver)
+                service = None
+            
+            try:
+                if service:
+                    driver = webdriver.Chrome(service=service, options=options)
+                else:
+                    driver = webdriver.Chrome(options=options)
+            except Exception as e:
+                print(f"Chrome failed: {e}")
+                # Fallback to Firefox
+                return WebDriverManager._create_firefox_driver()
+            
+        elif browser == 'firefox':
+            return WebDriverManager._create_firefox_driver()
+            
+        elif browser == 'edge':
+            options = EdgeOptions()
+            if Config.HEADLESS:
+                options.add_argument('--headless')
+            options.add_argument(f'--window-size={Config.WINDOW_SIZE}')
+            
+            # Try to find edgedriver in PATH first
+            driver_path = WebDriverManager.find_driver_in_path('msedgedriver')
+            if driver_path:
+                service = EdgeService(driver_path)
+            else:
+                service = None
+            
+            try:
+                if service:
+                    driver = webdriver.Edge(service=service, options=options)
+                else:
+                    driver = webdriver.Edge(options=options)
+            except Exception as e:
+                print(f"Edge failed: {e}")
+                # Fallback to Firefox
+                return WebDriverManager._create_firefox_driver()
+            
+        else:
+            raise ValueError(f"Unsupported browser: {browser}")
+        
+        # Configure timeouts
+        driver.implicitly_wait(Config.IMPLICIT_WAIT)
+        driver.set_page_load_timeout(Config.PAGE_LOAD_TIMEOUT)
+        
+        return driver
+    
+    @staticmethod
+    def _create_firefox_driver():
+        """Create Firefox driver with fallback options"""
+        options = FirefoxOptions()
+        if Config.HEADLESS:
+            options.add_argument('--headless')
+        
+        # Set window size
+        options.add_argument(f'--width={Config.get_window_size()[0]}')
+        options.add_argument(f'--height={Config.get_window_size()[1]}')
+        
+        # Try to find geckodriver in PATH first
+        driver_path = WebDriverManager.find_driver_in_path('geckodriver')
+        
+        try:
+            if driver_path:
+                service = FirefoxService(driver_path)
+                driver = webdriver.Firefox(service=service, options=options)
+            else:
+                # Try without service (use system geckodriver)
+                driver = webdriver.Firefox(options=options)
+        except Exception as e:
+            print(f"Firefox failed: {e}")
+            # Last resort - try Chrome without service
+            try:
+                chrome_options = ChromeOptions()
+                if Config.HEADLESS:
+                    chrome_options.add_argument('--headless')
+                chrome_options.add_argument(f'--window-size={Config.WINDOW_SIZE}')
+                chrome_options.add_argument('--no-sandbox')
+                chrome_options.add_argument('--disable-dev-shm-usage')
+                driver = webdriver.Chrome(options=chrome_options)
+                print("Using Chrome as fallback")
+            except Exception as chrome_e:
+                print(f"All browsers failed. Chrome error: {chrome_e}")
+                raise Exception("No working browser found. Please install Chrome, Firefox, or Edge with their respective drivers.")
+        
+        # Configure timeouts
+        driver.implicitly_wait(Config.IMPLICIT_WAIT)
+        driver.set_page_load_timeout(Config.PAGE_LOAD_TIMEOUT)
+        
+        return driver
