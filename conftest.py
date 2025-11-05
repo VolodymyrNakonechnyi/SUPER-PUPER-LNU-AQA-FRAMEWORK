@@ -9,16 +9,27 @@ def pytest_configure(config):
     # Create reports directory if it doesn't exist
     os.makedirs('reports', exist_ok=True)
     os.makedirs('screenshots', exist_ok=True)
+    
+    # Register custom markers
+    config.addinivalue_line("markers", "bdd: mark test as BDD scenario")
+    config.addinivalue_line("markers", "smoke: mark test as smoke test")
+    config.addinivalue_line("markers", "regression: mark test as regression test")
+    config.addinivalue_line("markers", "unit: mark test as unit test")
+    config.addinivalue_line("markers", "integration: mark test as integration test")
 
 
 def pytest_runtest_setup(item):
     """Setup before each test"""
-    print(f"\n=== Starting test: {item.name} ===")
+    print(f"\n{'='*50}")
+    print(f"Starting test: {item.name}")
+    print(f"{'='*50}")
 
 
 def pytest_runtest_teardown(item, nextitem):
     """Teardown after each test"""
-    print(f"=== Finished test: {item.name} ===")
+    print(f"{'='*50}")
+    print(f"Finished test: {item.name}")
+    print(f"{'='*50}\n")
 
 
 @pytest.fixture(scope="session")
@@ -54,4 +65,4 @@ def driver_with_screenshot(driver):
 
 def pytest_html_report_title(report):
     """Customize HTML report title"""
-    report.title = "Selenium Test Report"
+    report.title = "SUPER-PUPER-LNU-AQA-FRAMEWORK Test Report"
