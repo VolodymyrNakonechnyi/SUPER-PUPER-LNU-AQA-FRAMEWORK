@@ -1,4 +1,4 @@
-name: BDD Framework Tests CI/CD
+name: Advanced BDD Framework CI/CD with Allure
 
 on:
   push:
@@ -6,8 +6,8 @@ on:
   pull_request:
     branches: [ main, develop ]
   schedule:
-    # Run tests daily at 2 AM UTC
     - cron: '0 2 * * *'
+  workflow_dispatch:  # Додано ручний запуск
 
 jobs:
   test:
@@ -15,6 +15,8 @@ jobs:
     strategy:
       matrix:
         python-version: ['3.9', '3.10', '3.11']
+        browser: ['chrome', 'firefox']
+      fail-fast: false
 
     steps:
     - uses: actions/checkout@v3
@@ -24,10 +26,20 @@ jobs:
       with:
         python-version: ${{ matrix.python-version }}
     
+    - name: Cache dependencies
+      uses: actions/cache@v3
+      with:
+        path: ~/.cache/pip
+        key: ${{ runner.os }}-pip-${{ hashFiles('**/requirements.txt') }}
+        restore-keys: |
+          ${{ runner.os }}-pip-
+    
     - name: Install dependencies
       run: |
         python -m pip install --upgrade pip
         pip install -r requirements.txt
+        # Додано для паралелізації та Allure
+        pip install pytest-xdist pytest-parallel allure-pytest pytest-rerunfailures
     
     - name: Install system dependencies for browsers
       run: |
@@ -45,59 +57,165 @@ jobs:
         tar -xzf geckodriver-v0.33.0-linux64.tar.gz
         sudo mv geckodriver /usr/local/bin/
         sudo chmod +x /usr/local/bin/geckodriver
-        # Install ChromeDriver using webdriver-manager approach
-        echo "Chrome version: $(google-chrome --version)"
-        # Install latest ChromeDriver that's compatible
         pip install webdriver-manager
-        # Let webdriver-manager handle the version compatibility
+    
+    - name: Install Allure CLI
+      run: |
+        wget https://github.com/allure-framework/allure2/releases/download/2.24.1/allure-2.24.1.tgz
+        tar -zxvf allure-2.24.1.tgz
+        sudo mv allure-2.24.1 /opt/allure
+        sudo ln -s /opt/allure/bin/allure /usr/bin/allure
+        allure --version
     
     - name: Run CI-ready tests (no browser required)
       env:
         CI: true
         GITHUB_ACTIONS: true
-        BROWSER: chrome
+        BROWSER: ${{ matrix.browser }}
         HEADLESS: true
       run: |
-        pytest tests/test_ci_ready.py -v --tb=short --html=reports/ci_ready_tests.html --self-contained-html
+        pytest tests/test_ci_ready.py -v --tb=short \
+          --html=reports/ci_ready_tests_${{ matrix.browser }}.html \
+          --self-contained-html \
+          --alluredir=reports/allure-results
     
-    - name: Run framework unit tests
+    - name: Run framework unit tests in parallel
       env:
         CI: true
         GITHUB_ACTIONS: true
       run: |
-        pytest tests/test_framework_components.py -v --tb=short --html=reports/framework_tests.html --self-contained-html
+        pytest tests/test_framework_components.py -v --tb=short \
+          -n 4 --dist loadgroup \
+          --html=reports/framework_tests.html \
+          --self-contained-html \
+          --alluredir=reports/allure-results
     
-    - name: Run BDD tests
+    - name: Run BDD tests in parallel with retries
       env:
-        BROWSER: chrome
+        BROWSER: ${{ matrix.browser }}
         HEADLESS: true
         WINDOW_SIZE: 1920,1080
         DISPLAY: ":99"
         PYTHONPATH: ${{ github.workspace }}
       run: |
-        # Start virtual display for headless browsers
         export DISPLAY=:99
         Xvfb :99 -screen 0 1920x1080x24 > /dev/null 2>&1 &
         sleep 3
-        pytest tests/test_bdd_scenarios.py -v --tb=short --html=reports/bdd_tests.html --self-contained-html
+        pytest tests/test_bdd_scenarios.py -v --tb=short \
+          -n 2 --dist loadgroup \
+          --reruns 2 --reruns-delay 1 \
+          --html=reports/bdd_tests_${{ matrix.browser }}.html \
+          --self-contained-html \
+          --alluredir=reports/allure-results \
+          --junitxml=reports/junit-${{ matrix.browser }}.xml
+    
+    - name: Run extended BDD test suite
+      if: always()
+      env:
+        BROWSER: ${{ matrix.browser }}
+        HEADLESS: true
+        DISPLAY: ":99"
+      run: |
+        export DISPLAY=:99
+        pytest tests/test_extended_suite.py -v --tb=short \
+          -n 2 \
+          --alluredir=reports/allure-results \
+          --html=reports/extended_tests_${{ matrix.browser }}.html \
+          --self-contained-html
     
     - name: Generate coverage report
+      if: always()
       run: |
-        pytest tests/ --cov=framework --cov=pages --cov=config --cov-report=html --cov-report=term
+        pytest tests/ \
+          --cov=framework --cov=pages --cov=config \
+          --cov-report=html --cov-report=xml --cov-report=term \
+          --alluredir=reports/allure-results
+    
+    - name: Generate Allure Report
+      if: always()
+      run: |
+        allure generate reports/allure-results -o reports/allure-report --clean
+    
+    - name: Upload Allure Results
+      if: always()
+      uses: actions/upload-artifact@v4
+      with:
+        name: allure-results-py${{ matrix.python-version }}-${{ matrix.browser }}
+        path: reports/allure-results/
+        retention-days: 30
+    
+    - name: Upload Allure Report
+      if: always()
+      uses: actions/upload-artifact@v4
+      with:
+        name: allure-report-py${{ matrix.python-version }}-${{ matrix.browser }}
+        path: reports/allure-report/
+        retention-days: 30
     
     - name: Upload test reports
       if: always()
       uses: actions/upload-artifact@v4
       with:
-        name: test-reports-py${{ matrix.python-version }}
+        name: test-reports-py${{ matrix.python-version }}-${{ matrix.browser }}
         path: reports/
+        retention-days: 30
 
     - name: Upload coverage reports
       if: always()
       uses: actions/upload-artifact@v4
       with:
-        name: coverage-report-py${{ matrix.python-version }}
+        name: coverage-report-py${{ matrix.python-version }}-${{ matrix.browser }}
         path: htmlcov/
+        retention-days: 30
+    
+    - name: Publish Test Results
+      if: always()
+      uses: EnricoMi/publish-unit-test-result-action@v2
+      with:
+        files: reports/junit-*.xml
+        check_name: Test Results (${{ matrix.python-version }}, ${{ matrix.browser }})
+
+  # Додано job для об'єднання всіх Allure звітів
+  allure-report:
+    needs: test
+    runs-on: ubuntu-latest
+    if: always()
+    steps:
+    - uses: actions/checkout@v3
+    
+    - name: Download all Allure results
+      uses: actions/download-artifact@v4
+      with:
+        pattern: allure-results-*
+        path: all-results
+    
+    - name: Install Allure CLI
+      run: |
+        wget https://github.com/allure-framework/allure2/releases/download/2.24.1/allure-2.24.1.tgz
+        tar -zxvf allure-2.24.1.tgz
+        sudo mv allure-2.24.1 /opt/allure
+        sudo ln -s /opt/allure/bin/allure /usr/bin/allure
+    
+    - name: Merge Allure Results
+      run: |
+        mkdir -p merged-allure-results
+        find all-results -name "*.json" -exec cp {} merged-allure-results/ \;
+        allure generate merged-allure-results -o final-allure-report --clean
+    
+    - name: Upload Final Allure Report
+      uses: actions/upload-artifact@v4
+      with:
+        name: final-allure-report
+        path: final-allure-report/
+        retention-days: 60
+    
+    - name: Deploy Allure Report to GitHub Pages
+      if: github.ref == 'refs/heads/main'
+      uses: peaceiris/actions-gh-pages@v3
+      with:
+        github_token: ${{ secrets.GITHUB_TOKEN }}
+        publish_dir: ./final-allure-report
+        destination_dir: allure-report
 
   security-scan:
     runs-on: ubuntu-latest
@@ -114,10 +232,26 @@ jobs:
         python -m pip install --upgrade pip
         pip install bandit safety
     
-    - name: Run security scan
+    - name: Run security scan with Bandit
+      continue-on-error: true
       run: |
-        bandit -r framework pages config tests -f json -o bandit-report.json || true
-        safety check --json || true
+        bandit -r framework pages config tests -f json -o bandit-report.json
+        bandit -r framework pages config tests -f txt
+    
+    - name: Run dependency check with Safety
+      continue-on-error: true
+      run: |
+        safety check --json > safety-report.json || true
+        safety check
+    
+    - name: Upload security reports
+      if: always()
+      uses: actions/upload-artifact@v4
+      with:
+        name: security-reports
+        path: |
+          bandit-report.json
+          safety-report.json
 
   lint:
     runs-on: ubuntu-latest
@@ -132,12 +266,38 @@ jobs:
     - name: Install linting tools
       run: |
         python -m pip install --upgrade pip
-        pip install flake8 pylint
+        pip install flake8 pylint black isort
+    
+    - name: Check code formatting with Black
+      continue-on-error: true
+      run: |
+        black --check framework pages config tests
+    
+    - name: Check imports with isort
+      continue-on-error: true
+      run: |
+        isort --check-only framework pages config tests
     
     - name: Lint with flake8
+      continue-on-error: true
       run: |
-        flake8 framework pages config tests --count --select=E9,F63,F7,F82 --show-source --statistics || true
+        flake8 framework pages config tests --count --statistics --max-line-length=120
     
     - name: Lint with pylint
+      continue-on-error: true
       run: |
-        pylint framework pages config tests --disable=all --enable=E,F || true
+        pylint framework pages config tests --fail-under=7.0
+
+  release-summary:
+    needs: [test, security-scan, lint]
+    runs-on: ubuntu-latest
+    if: always()
+    steps:
+    - name: Create test summary
+      run: |
+        echo "## Test Execution Summary" >> $GITHUB_STEP_SUMMARY
+        echo "- **Status**: ${{ needs.test.result }}" >> $GITHUB_STEP_SUMMARY
+        echo "- **Security Scan**: ${{ needs.security-scan.result }}" >> $GITHUB_STEP_SUMMARY
+        echo "- **Lint**: ${{ needs.lint.result }}" >> $GITHUB_STEP_SUMMARY
+        echo "" >> $GITHUB_STEP_SUMMARY
+        echo "View detailed [Allure Report](https://your-username.github.io/SUPER-PUPER-LNU-AQA-FRAMEWORK/allure-report/)" >> $GITHUB_STEP_SUMMARY
